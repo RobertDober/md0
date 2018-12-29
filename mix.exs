@@ -6,6 +6,7 @@ defmodule Md0.MixProject do
       app: :md0,
       version: "0.1.0",
       elixir: "~> 1.7",
+      escript: escript_config(),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -26,4 +27,9 @@ defmodule Md0.MixProject do
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"},
     ]
   end
+
+  defp escript_config do
+    [main_module: Md0.Runner]
+  end
+
 end

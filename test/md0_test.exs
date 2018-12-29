@@ -46,6 +46,20 @@ defmodule Md0Test do
     test "edge case empty" do
       assert Md0.TableScanner.scan_document("") == []
     end
+    @debugging """
+      ``Hello
+    * *
+    *`
+    * 
+    """
+    test "debugging" do
+      assert Md0.TableScanner.scan_document(@debugging) == [
+        {:indent, "  ", 1, 1}, {:back, "``", 1, 3}, {:any, "Hello", 1, 5},
+        {:li, "* ", 2, 1}, {:star, "*", 2, 3},
+        {:star, "*", 3, 1}, {:back, "`", 3, 2},
+        {:li, "* ", 4, 1},
+      ]
+    end
   end
 
   # describe "Macro Scanner" do
