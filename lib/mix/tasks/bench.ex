@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Bench do
     macro: nil,
     manual: Md0.ManualScanner,
     rgx: Md0.RgxScanner,
-    table: nil,
+    table: Md0.TableScanner,
   ]
 
   @impl true
@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Bench do
   defp timed(title, fun) do
     IO.puts "START: #{title}"
     start_time = Time.utc_now
-    fun.() |> IO.inspect
+    fun.() # |> IO.inspect
     ellapsed_us = Time.diff(Time.utc_now, start_time, :microseconds)
     IO.puts "DURATION: #{ellapsed_us}"
   end

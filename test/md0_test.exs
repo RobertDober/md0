@@ -62,11 +62,13 @@ defmodule Md0Test do
     end
   end
 
-  # describe "Macro Scanner" do
-  #   test "sample" do
-  #     assert Md0.MacroScanner.scan(@input) == @tokens
-  #   end
-  # end
-  #
+  describe "Macro Scanner" do
+    test "sample" do
+      assert Md0.MacroScanner.scan(@input) == @tokens
+    end
+    test "edge case empty" do
+      assert Md0.MacroScanner.scan_document("") == []
+    end
+  end
 
 end

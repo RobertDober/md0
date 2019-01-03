@@ -1,5 +1,5 @@
 defmodule Md0.RgxScanner do
-  use Md0.Scanner.Macros
+  use Md0.Scanner.RgxMacros
 
   @moduledoc """
   A lexical Analyzer of markdown documents
