@@ -34,15 +34,20 @@ defmodule Mix.Tasks.Bench do
     |> Enum.map(&map_scanner(true, &1))
   end
 
-  defp bench_scanner(filename, {scanner_name,_}) do
+  defp bench_scanner(filename, {scanner_name,_}, warmup \\ false) do
     with scanner <- Keyword.get(@all_scanners, scanner_name) do
       with content <- get_content(File.read(filename), filename) do
         if scanner do
-          timed("scanning with #{scanner} scanner", fn -> scanner.scan_document(content) end)
+          if warmup do
+            scanner.scan_document(content)
+          else
+            timed("scanning with #{scanner} scanner", fn -> scanner.scan_document(content) end)
+          end
         end
       end
     end
   end
+
 
   defp get_content({:ok, content},_), do: content
   defp get_content({:error, reason},filename) do
@@ -69,7 +74,10 @@ defmodule Mix.Tasks.Bench do
   end
   defp process([_|_]=errors), do: IO.puts(:stderr, "The following switches are undefined: #{inspect(errors)}")
   defp process({filename, []}), do: process({filename, @all_scanners})
-  defp process({filename, scanners}), do: Enum.each(scanners, &bench_scanner(filename, &1))
+  defp process({filename, scanners}) do
+    Enum.each(scanners, &bench_scanner(filename, &1, true))
+    Enum.each(scanners, &bench_scanner(filename, &1))
+  end
 
   defp switches() do
     [
@@ -82,7 +90,7 @@ defmodule Mix.Tasks.Bench do
     IO.puts "START: #{title}"
     start_time = Time.utc_now
     fun.() # |> IO.inspect
-    ellapsed_us = Time.diff(Time.utc_now, start_time, :microseconds)
+    ellapsed_us = Time.diff(Time.utc_now, start_time, :microsecond)
     IO.puts "DURATION: #{ellapsed_us}"
   end
 end

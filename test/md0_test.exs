@@ -21,6 +21,15 @@ defmodule Md0Test do
     {:indent, "  ", 8, 1}, {:star, "**", 8, 3},
   ]
 
+  describe "Macro Scanner" do
+    test "sample" do
+      assert Md0.MacroScanner.scan_document(@input) == @tokens
+    end
+    test "edge case empty" do
+      assert Md0.MacroScanner.scan_document("") == []
+    end
+  end
+
   describe "Regex Scanner" do
     test "sample" do
       assert Md0.RgxScanner.scan_document(@input) == @tokens
@@ -62,13 +71,5 @@ defmodule Md0Test do
     end
   end
 
-  describe "Macro Scanner" do
-    test "sample" do
-      assert Md0.MacroScanner.scan(@input) == @tokens
-    end
-    test "edge case empty" do
-      assert Md0.MacroScanner.scan_document("") == []
-    end
-  end
 
 end
