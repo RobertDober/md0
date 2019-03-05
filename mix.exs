@@ -32,4 +32,6 @@ defmodule Md0.MixProject do
     [main_module: Md0.Runner]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 end
