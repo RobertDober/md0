@@ -1,9 +1,11 @@
 defmodule Md0.Scanner.TableScanner.Helper do
 
   alias Md0.Scanner.TableScannerImpl, as: Scanner
+  alias Md0.Tools.Map, as: M
   
   @legal_actions %{
     collect: &Scanner.collect/1,
+    collect_emit: &Scanner.collect_emit/1,
     emit_collect: &Scanner.emit_collect/1,
     emit_return: &Scanner.emit_return/1,
     return: &Scanner.return/1
@@ -41,12 +43,17 @@ defmodule Md0.Scanner.TableScanner.Helper do
   defp _add_transform(transform, result)
   defp _add_transform({state, grapheme, {new_state, action}}, result), do:
     _add_transform({state, grapheme, {new_state, new_state, action}}, result)
-  defp _add_transform({state, grapheme, transform}, result), do:
-    nil
+  defp _add_transform({state, grapheme, transform}, result) do
+    case M.put_deep(result, [state, grapheme], _action(transform)) do
+      {:ok, result1} -> result1
+      {:error, message} -> raise "#{message}\n\n----------\n#{state} #{inspect grapheme}"
+    end
+  end
 
                      
   defp _transform(transaformations, result)
   defp _transform([], result), do: result
   defp _transform([transform|rest], result), do: _transform(rest, _add_transform(transform, result))
+
 
 end

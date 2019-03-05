@@ -17,6 +17,7 @@ defmodule Md0.Scanner.TableScanner do
   defmacro __using__(_options) do
     quote do
       import Md0.Scanner.TableScannerImpl, only: [scan_line: 2]
+      import unquote(__MODULE__)
       @before_compile unquote(__MODULE__)
       Module.register_attribute __MODULE__, :_scan_table, accumulate: true 
     end
