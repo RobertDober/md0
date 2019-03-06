@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Bench do
     macro: nil,
     manual: Md0.ManualScanner,
     rgx: Md0.RgxScanner,
-    table: Md0.TableScanner,
+    table: Md0.MacroScanner,
   ]
 
   @impl true
@@ -29,11 +29,6 @@ defmodule Mix.Tasks.Bench do
     |> process()
   end
   
-  defp all_scanners do
-    @all_scanners
-    |> Enum.map(&map_scanner(true, &1))
-  end
-
   defp bench_scanner(filename, {scanner_name,_}, warmup \\ false) do
     with scanner <- Keyword.get(@all_scanners, scanner_name) do
       with content <- get_content(File.read(filename), filename) do

@@ -36,13 +36,13 @@ defmodule Md0.Scanner.TableScanner.Helper do
     if action_fn do
       {state, emit_state, action_fn}
     else
-      raise "Error, illegal action #{action}, supported actions are #{Map.keys(@legal_actions)|>List.join(", ")}"
+      raise "Error, illegal action #{action}, supported actions are #{Map.keys(@legal_actions)|>Enum.join(", ")}"
     end
   end
 
   defp _add_transform(transform, result)
   defp _add_transform({state, grapheme, {new_state, action}}, result), do:
-    _add_transform({state, grapheme, {new_state, new_state, action}}, result)
+    _add_transform({state, grapheme, {new_state, nil, action}}, result)
   defp _add_transform({state, grapheme, transform}, result) do
     case M.put_deep(result, [state, grapheme], _action(transform)) do
       {:ok, result1} -> result1

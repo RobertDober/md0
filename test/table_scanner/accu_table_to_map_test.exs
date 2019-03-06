@@ -14,7 +14,7 @@ defmodule TableScanner.AccuTableToMapTest do
     ]
     assert accu_table_to_map(original) == %{
       state: %{
-        " " => {:space, :space, &Scanner.return/1} 
+        " " => {:space, nil, &Scanner.return/1} 
       }
     }
   end
@@ -28,8 +28,8 @@ defmodule TableScanner.AccuTableToMapTest do
         {:any, :eof, {:end, :any, :return}}
       ]
       assert accu_table_to_map(original) == %{
-        start: %{ " " => {:space, :space, &Scanner.return/1},
-          true => {:any, :any, &Scanner.emit_collect/1}},
+        start: %{ " " => {:space, nil, &Scanner.return/1},
+          true => {:any, nil, &Scanner.emit_collect/1}},
          any: %{ eof: {:end, :any, &Scanner.return/1}}
        }
     end
