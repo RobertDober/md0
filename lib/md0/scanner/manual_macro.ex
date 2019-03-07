@@ -4,7 +4,6 @@ defmodule Md0.Scanner.ManualMacro do
     definitions = 
     Module.get_attribute(env.module, :_transitions) 
     |> Enum.map(&emit_scan_definition/1)
-    |> IO.inspect
 
     quote do
       def scan(transition)
@@ -40,6 +39,12 @@ defmodule Md0.Scanner.ManualMacro do
 
   defmacro anything(params), do: add_transition(:anything, params)
 
+  @default_params %{
+    advance: true,
+    collect: true,
+    emit: nil,
+    state: nil
+  }
   defp add_transition(trans_type, params, grapheme \\ nil) do
     params1 =
     if is_list(params) do
@@ -59,7 +64,77 @@ defmodule Md0.Scanner.ManualMacro do
 
 
   def emit_scan_definition(transition)
-  def emit_scan_definition({:empty, current_state, nil, nil}) do
+  def emit_scan_definition({:empty, current_state, params, nil}), do:
+    emit_scan_def_empty(current_state, params)
+  def emit_scan_definition({:anything, current_state, params, nil}), do:
+    emit_scan_def_on(current_state, (quote do: head), params)
+  def emit_scan_definition({:on, current_state, params, grapheme}), do:
+    emit_scan_def_on(current_state, (quote do: unquote(grapheme)), params)
+
+
+  defp emit_scan_def_empty(current_state, params)
+  defp emit_scan_def_empty(current_state, %{state: state}=params) do
+    if current_state == state do
+      raise "Error loop in state #{inspect current_state} at EOI"
+    end
+    if state == nil || state == :halt do
+      emit_scan_def_empty_return(current_state, params)
+    else
+      emit_scan_def_empty_new_state(current_state, params)
+    end
+  end
+
+  defp emit_scan_def_empty_return(current_state, params) do
+  defp emit_scan_def_empty_return(current_state, %{emit: false}) do
+    quote do
+      def scan({unquote(current_state), [], col, partial, tokens}), do: tokens |> Enum.reverse
+    end
+  end
+  defp emit_scan_def_empty_return(current_state, %{emit: emit}) do
+    quote do
+      def scan({unquote(current_state), [], col, partial, tokens}), do:
+        [{unquote(emit), string_from(partial), col} | tokens] |> Enum.reverse
+    end
+  end
+
+
+  defp emit_scan_def_on(current_state, first_element, params)
+  defp emit_scan_def_on(current_state, first_element, %{advance: false}=params), do:
+    emit_scan_def_no_advance(current_state, params)
+  defp emit_scan_def_on(first_element, first_element, %{collect: false}=params), do:
+    emit_scan_def_no_collect(current_state, first_element, params)
+
+
+  defp emit_scan_def_no_advance(current_state, %{state: state} = params) do
+    if current_state == ( state || current_state ) do
+      raise "Error loop in state #{inspect current_state} must not use advance: false without changing state"
+    end
+    if state == :halt do
+      emit_scan_def_return(current_state, params)
+    else
+      emit_scan_def_continue(current_state, params)
+    end
+  end
+
+  defp emit_scan_def_return(current_state, params) do
+  defp emit_scan_def_return(current_state, %{emit: false}) do
+    quote do
+      def scan({unquote(current_state), _, col, partial, tokens}), do: tokens |> Enum.reverse
+    end
+  end
+  defp emit_scan_def_return(current_state, %{collect: false, emit: emit}) do
+    quote do
+      def scan({unquote(current_state), _, col, partial, tokens}), do:
+        [{unquote(emit), string_from(partial), col} | tokens] |> Enum.reverse
+    end
+  end
+    quote do
+      def scan({unquote(current_state), input, col, partial,
+    end
+
+  end
+
+
     quote do
       def scan({ unquote(current_state), [], _, _, tokens}), do: Enum.revers(tokens) 
     end
