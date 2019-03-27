@@ -63,15 +63,15 @@ defmodule Md0.Scanner.ManualMacro do
 
 
   defp emit_scan_definition(transition)
-  defp emit_scan_definition({:empty, current_state, params), do:
+  defp emit_scan_definition({:empty, current_state, params}), do:
     emit_empty_state_def(current_state, params)
   defp emit_scan_definition({trigger, current_state, %{state: :halt} = params}), do:
     emit_halt_state_def(trigger, current_state, params)
   defp emit_scan_definition({trigger, current_state, %{advance: false} = params}), do:
     emit_no_advance_state_def(trigger, currrent_state, params)
-  defp emit_scan_definition({:anything, current_state, params), do:
+  defp emit_scan_definition({:anything, current_state, params}), do:
     emit_advance_any_state_def(current_state, params)
-  defp emit_scan_definition({grapheme, current_state, params), do:
+  defp emit_scan_definition({grapheme, current_state, params}), do:
     emit_advance_on_state_def(grapheme, current_state, params)
 
 
@@ -128,6 +128,153 @@ defmodule Md0.Scanner.ManualMacro do
   defp emit_halt_state_def(_, cs, _), do:
     raise "Error collect does not make any sense in this halting context of state: #{cs}"
     
+  defp emit_no_advance_state_def(trigger, current_state, params)
+  defp emit_no_advance_state_def(_, cs, %{state: nil}), do: raise "Error looping with no advance in state: #{cs}"
+  defp emit_no_advance_state_def(_, cs, %{state: ns}) when ns == cs do
+    raise "Error looping with no advance in state: #{cs}"
+  end
+  defp emit_no_advance_state_def(:anything, cs, %{collect: false, emit: nil, state: ns}), do:
+    quote do
+      def scan(unquote(cs), input, col, part, tokens), do: scan(unquote(ns), input, col, part, tokens)
+    end
+  defp emit_no_advance_state_def(grapheme, cs, %{collect: false, emit: nil, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens), do: scan(unquote(ns), input, col, part, tokens)
+    end
+  defp emit_no_advance_state_def(:anything, cs, %{emit: nil, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [head|_]=input, col, part, tokens), do: scan(unquote(ns), input, col, [head|part], tokens)
+    end
+  defp emit_no_advance_state_def(grapheme, cs, %{emit: nil, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens), do: scan(unquote(ns), input, col, [unquote(grapheme)|part], tokens)
+    end
+  defp emit_no_advance_state_def(:anything, cs, %{collect: :before, emit: emit, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [head|_]=input, col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, [head|part], unquote(emit))
+        scan(unquote(ns), input, nc, [], nts)
+      end
+    end
+  defp emit_no_advance_state_def(grapheme, cs, %{collect: :before, emit: emit, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, [unquote(grapheme)|part], unquote(emit))
+        scan(unquote(ns), input, nc, [], nts)
+      end
+    end
+  defp emit_no_advance_state_def(:anything, cs, %{collect: nil, emit: emit, state: ns}), do:
+    quote do
+      def scan(unquote(cs), input, col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), input, nc, [], nts)
+      end
+    end
+  defp emit_no_advance_state_def(grapheme, cs, %{collect: nil, emit: emit, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), input, nc, [], nts)
+      end
+    end
+  defp emit_no_advance_state_def(:anything, cs, %{emit: emit, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [head|_]=input, col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), input, nc, [head], nts)
+      end
+    end
+  defp emit_no_advance_state_def(grapheme, cs, %{emit: emit, state: ns}), do:
+    quote do
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), input, nc, [unquote(grapheme)], nts)
+      end
+    end
+    
+  defp emit_advance_any_state_def(current_state, params)
+  defp emit_advance_any_state_def(cs, %{collect: false, emit: nil}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [head|rest], col, part, tokens), do: scan(unquote(ns), rest, col, part, tokens)
+    end
+  end
+  defp emit_advance_any_state_def(cs, %{emit: nil}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [head|rest], col, part, tokens), do: scan(unquote(ns), rest, col, [head|part], tokens)
+    end
+  end
+  defp emit_advance_any_state_def(cs, %{collect: :before, emit: emit}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [head|rest], col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, [head|part], unquote(emit))
+        scan(unquote(ns), rest, nc, [], nts)
+      end
+    end
+  end
+  defp emit_advance_any_state_def(cs, %{collect: false, emit: emit}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [_|rest], col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), rest, nc, [], nts)
+      end
+    end
+  end
+  defp emit_advance_any_state_def(cs, %{emit: emit}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [head|rest], col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), rest, nc, [head], nts)
+      end
+    end
+  end
+
+  defp emit_advance_on_state_def(grapheme, current_state, params)
+  defp emit_advance_on_state_def(g, cs, %{collect: false, emit: nil}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens), do:
+        scan(unquote(ns), rest, col, part, tokens)
+    end
+  end
+  defp emit_advance_on_state_def(g, cs, %{collect: true, emit: nil}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens), do:
+        scan(unquote(ns), rest, col, [unquote(g)|part], tokens)
+    end
+  end
+  defp emit_advance_on_state_def(g, cs, %{collect: :before, emit: emit}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, [unquote(g)|part], unquote(emit))
+        scan(unquote(ns), rest, nc, [], nts)
+      end
+    end
+  end
+  defp emit_advance_on_state_def(g, cs, %{collect: false, emit: emit}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), rest, nc, [], nts)
+      end
+    end
+  end
+  defp emit_advance_on_state_def(g, cs, %{emit: emit}=params) do
+    ns = Map.get(params, :state) || cs
+    quote do
+      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
+        scan(unquote(ns), rest, nc, [unquote(g)], nts)
+      end
+    end
+  end
 
 
   defp add_token(tokens, col, part, state) do
