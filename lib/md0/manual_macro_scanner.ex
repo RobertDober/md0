@@ -1,9 +1,7 @@
 defmodule Md0.ManualMacroScanner do
 
-  @typep token :: {atom(), String.t, number()}
-  @typep tokens :: list(token)
-  @typep graphemes :: list(String.t)
-  @typep scan_info :: {atom(), graphemes(), number(), IO.chardata(), tokens()}
+  use Md0.Scanner.ManualMacro
+
   def scan_document(doc) do
     doc
     |> String.split(~r{\r\n?|\n})
@@ -11,76 +9,79 @@ defmodule Md0.ManualMacroScanner do
     |> Enum.flat_map(&scan_line/1)
   end
 
-  defp add_lnb({tk, ct, col}, lnb), do: {tk, ct, lnb, col}
 
-  @spec scan_line({String.t, number()}) :: tokens 
-  defp scan_line({line, lnb}),
-    do: scan({ :start, String.graphemes(line), 1, [], [] }) |> Enum.map(&add_lnb(&1, lnb))
-
-  @spec scan( scan_info ) :: tokens
-  defp scan(scan_state)
-
-  defp scan({ :any, [], col, partial, tokens }), do: emit_return(:any, col, partial, tokens)
-  defp scan({ :any, [" " | rest], col, partial, tokens }), do: emit_collect({:any, rest, col, partial, tokens}, " ", :ws)
-  defp scan({ :any, ["*" | rest], col, partial, tokens }), do: emit_collect({:any, rest, col, partial, tokens},  "*",  :star)
-  defp scan({ :any, ["`" | rest], col, partial, tokens }), do: emit_collect({:any, rest, col, partial, tokens},  "`",  :back)
-  defp scan({ :any, [grapheme | rest], col, partial, tokens }), do: scan({ :any, rest, col, [grapheme | partial], tokens })
-
-  defp scan({ :back, [], col, partial, tokens }), do: emit_return(:back, col, partial, tokens)
-  defp scan({ :back, [" " | rest], col, partial, tokens }), do: emit_collect({:back, rest, col, partial, tokens},  " ",  :ws)
-  defp scan({ :back, ["`" | rest], col, partial, tokens }), do: scan({ :back, rest, col, ["`"| partial], tokens })
-  defp scan({ :back, ["*" | rest], col, partial, tokens }), do: emit_collect({:back, rest, col, partial, tokens},  "*",  :star)
-  defp scan({ :back, [grapheme | rest], col, partial, tokens }), do: emit_collect({:back, rest, col, partial, tokens},  grapheme,  :any)
-
-  defp scan({ :indent, [], col, partial, tokens }), do: emit_return(:indent, col, partial, tokens)
-  defp scan({ :indent, [" " | rest], col, partial, tokens }), do: scan({ :indent, rest, col, [" " | partial], tokens })
-  defp scan({ :indent, ["*" | rest], col, partial, tokens }), do: emit_collect({:indent, rest, col, partial, tokens},  "*",  :li)
-  defp scan({ :indent, ["`" | rest], col, partial, tokens }), do: emit_collect({:indent, rest, col, partial, tokens},  "`",  :back )
-  defp scan({ :indent, [grapheme | rest], col, partial, tokens }), do: emit_collect({:indent, rest, col, partial, tokens},  grapheme,  :any)
-
-  defp scan({ :li, [], col, partial, tokens }), do: emit_return(:star, col, partial, tokens)
-  defp scan({ :li, [" " | rest], col, partial, tokens }), do: collect_emit({:li, rest, col, partial, tokens},  " ",  :rest)
-  defp scan({ :li, ["*" | rest], col, partial, tokens }), do: scan({ :star, rest, col, ["*"|partial], tokens })
-  defp scan({ :li, ["`" | rest], col, partial, tokens }), do: emit_collect({:star, rest, col, partial, tokens},  "`",  :back)
-  defp scan({ :li, [grapheme| rest], col, partial, tokens }), do: emit_collect({:star, rest, col, partial, tokens},  grapheme,  :any)
-
-  defp scan({ :rest, [], _, _, tokens }), do: tokens |> Enum.reverse
-  defp scan({ :rest, [" " | rest], col, partial, tokens }), do: scan({ :ws, rest, col, [" "|partial], tokens })
-  defp scan({ :rest, ["*" | rest], col, partial, tokens }), do: scan({ :star, rest, col, ["*"|partial], tokens })
-  defp scan({ :rest, ["`" | rest], col, partial, tokens }), do: scan({ :back, rest, col, ["`"|partial], tokens })
-  defp scan({ :rest, [grapheme | rest], col, partial, tokens }), do: scan({ :any, rest, col, [grapheme|partial], tokens })
-
-  defp scan({ :star, [], col, partial, tokens }), do: emit_return(:star, col, partial, tokens)
-  defp scan({ :star, [" " | rest], col, partial, tokens }), do: emit_collect({:star, rest, col, partial, tokens},  " ",  :ws)
-  defp scan({ :star, ["`" | rest], col, partial, tokens }), do: emit_collect({:star, rest, col, partial, tokens},  "`",  :back)
-  defp scan({ :star, ["*" | rest], col, partial, tokens }), do: scan({ :star, rest, col, ["*"| partial], tokens })
-  defp scan({ :star, [grapheme | rest], col, partial, tokens }), do: emit_collect({:star, rest, col, partial, tokens},  grapheme,  :any)
-
-  defp scan({ :start, [], _, _, _ }), do: []
-  defp scan({ :start, [" " | rest], col, partial, tokens }), do: scan({ :indent, rest, col, [" " | partial], tokens })
-  defp scan({ :start, ["*" | rest], col, partial, tokens }), do: scan({ :li, rest, col, ["*" | partial], tokens })
-  defp scan({ :start, ["`" | rest], col, partial, tokens }), do: scan({ :back, rest, col, ["`" | partial], tokens })
-  defp scan({ :start, [grapheme | rest], col, partial, tokens }), do: scan({ :any, rest, col, [grapheme | partial], tokens })
-
-  defp scan({ :ws, [], col, partial, tokens }), do: emit_return(:ws, col, partial, tokens)
-  defp scan({ :ws, [" " | rest], col, partial, tokens }), do: scan({ :ws, rest, col, [" "| partial], tokens })
-  defp scan({ :ws, ["`" | rest], col, partial, tokens }), do: emit_collect({:ws, rest, col, partial, tokens},  "`",  :back)
-  defp scan({ :ws, ["*" | rest], col, partial, tokens }), do: emit_collect({:ws, rest, col, partial, tokens},  "*",  :li)
-  defp scan({ :ws, [grapheme | rest], col, partial, tokens }), do: emit_collect({:ws, rest, col, partial, tokens},  grapheme,  :any)
-
-  @spec collect_emit( scan_info(), IO.chardata, atom() ) :: tokens()
-  defp collect_emit({emit_state, input, col, partial, tokens}, grapheme, new_state) do
-    with rendered <- string_from([grapheme|partial]),
-       do: scan({ new_state, input, col + String.length(rendered), [], [{emit_state, rendered, col} | tokens] })
+  state :start do
+    empty :halt# allows input do end here and emit all tokens scanned so far
+    on " ", :indent
+    on "*", :li
+    on "`", :back
+    anything :any
   end
 
-  @spec emit_collect( scan_info(), IO.chardata, atom() ) :: tokens()
-  defp emit_collect({emit_state,input, col, partial, tokens}, grapheme, new_state) do
-    with rendered <- string_from(partial),
-       do: scan({ new_state, input, col + String.length(rendered), [grapheme], [ {emit_state, rendered, col} | tokens] })
+  state :any do
+    empty :halt, emit: :any # and returns implicitly
+    on " ", :ws, emit: :any # " " is collected **after** emission
+    on "*", :star, emit: :any
+    on "`", :back, emit: :any
+    anything :any # Maybe a good idea to add the `anything current_state` transition as default transiton for a state
   end
 
-  defp emit_return(state, col, partial, tokens), do: [{state, string_from(partial), col} | tokens] |> Enum.reverse
+  state :back do
+    empty :halt, emit: :back
+    on " ", :ws, emit: :back
+    on "`", :back
+    on "*", :star, emit: :back
+    anything :any, emit: :back
+  end
 
-  defp string_from(partial), do: partial |> IO.iodata_to_binary() |> String.reverse()
+  state :indent do
+    empty :halt, emit: :indent
+    on " ", :indent
+    on "*", :li, emit: :indent
+    on "`", :back, emit: :indent
+    anything :any, emit: :indent
+  end
+  # Looking at the three above states the following syntax seems like a big gain
+  # e.g.
+  #       state :back do
+  #         with_default emit: :back do
+  #           empty :halt
+  #           on " ", :ws
+  #           on "*", :star
+  #           anything :any
+  #         end
+  #         consume "`"               # same as on "`" <current state>
+  #       end
+
+  state :li do
+    empty :halt, emit: :star
+    on " ", :rest, emit: :li, collect: :before # this means the " " is part of the emitted token and not the next one
+    on "*", :star
+    on "`", :back, emit: :star
+    anything :any, emit: :star
+  end
+
+  state :rest do
+    empty :halt
+    on " ", :ws
+    on "*", :star
+    on "`", :back
+    anything :any
+  end
+
+  state :star do
+    empty :halt, emit: :star
+    on " ", :ws, emit: :star
+    on "`", :back, emit: :star
+    on "*", :star
+    anything :any, emit: :star
+  end
+
+  state :ws do
+    empty :halt, emit: :ws
+    on " ", :ws
+    on "`", :back, emit: :ws
+    on "*", :li, emit: :ws
+    anything :any, emit: :ws
+  end
 end

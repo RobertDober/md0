@@ -48,6 +48,15 @@ defmodule Md0Test do
     end
   end
 
+  describe "Manual Macro Scanner" do
+    test "sample" do
+      assert Md0.ManualMacroScanner.scan_document(@input) == @tokens
+    end
+    test "edge case empty" do
+      assert Md0.ManualMacroScanner.scan_document("") == []
+    end
+  end
+
   describe "Table Scanner" do
     test "sample" do
       assert Md0.TableScanner.scan_document(@input) == @tokens

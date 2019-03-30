@@ -4,9 +4,33 @@ defmodule Md0.ToyMacroScanner do
 
   
   state :start do
-    empty :blank
-    on " ", state: :indent
-    # anything state: :command
+    empty emit: :blank
+    on " ", :indent
+    anything :command
+  end
+
+  state :any do
+    # Should next transition be default?
+    empty emit: :any
+    anything :any
+  end
+
+  state :indent do
+    empty emit: :indent
+    on " ", :indent
+    anything :any, emit: :indent
+  end
+
+  state :command do
+    empty emit: :command
+    on " ", :ws, emit: :command
+    anything :command
+  end
+
+  state :ws do
+    empty emit: :ws
+    on " ", :ws
+    anything :any, emit: :ws
   end
 
 
@@ -53,7 +77,4 @@ defmodule Md0.ToyMacroScanner do
   #      do: scan({ new_state, input, col + String.length(rendered), [], [ {emit_state, rendered, col} | tokens] })
   # end
 
-  defp emit_return(state, col, partial, tokens), do: [{state, string_from(partial), col} | tokens] |> Enum.reverse
-
-  defp string_from(partial), do: partial |> IO.iodata_to_binary() |> String.reverse()
 end
