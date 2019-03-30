@@ -3,13 +3,18 @@ defmodule Md0.Scanner.ManualMacro do
   defmacro __before_compile__(env) do
     definitions = 
     Module.get_attribute(env.module, :_transitions) 
+    |> Enum.reverse
     |> Enum.map(&emit_scan_definition/1)
 
+    if System.get_env("DEBUG_MACROS") do
+      definitions
+      |> Macro.to_string
+      |> IO.puts
+    end
     quote do
-      def scan(transition)
-      def scan(:undefined), do: []
-      defoverridable scan: 1
-      unquote(definitions)
+      def scan(nil, nil, 0, nil, nil), do: []
+      defoverridable scan: 5
+      unquote_splicing(definitions)
     end
   end
 
@@ -17,9 +22,8 @@ defmodule Md0.Scanner.ManualMacro do
     quote do
       @before_compile unquote(__MODULE__)
       import unquote(__MODULE__)
-      import unquote(__MODULE__).Helpers
-      def scan_line(line), do:
-        scan({:start, String.graphemes(line), 1, [], []})
+      def scan_line({line, lnb}), do:
+        scan(:start, String.graphemes(line), {lnb, 1}, [], [])
       Module.register_attribute __MODULE__, :_transitions, accumulate: true
       Module.register_attribute __MODULE__, :_current_state, accumulate: false
     end
@@ -47,6 +51,9 @@ defmodule Md0.Scanner.ManualMacro do
   }
 
   defp add_transition(trigger, state, params)
+  defp add_transition(:empty, state, _params) when is_list(state) do
+    _add_transition(:empty, Keyword.put_new(state, :state, :halt))
+  end
   defp add_transition(trigger, state, _params) when is_list(state) do
     _add_transition(trigger, state)
   end
@@ -55,9 +62,16 @@ defmodule Md0.Scanner.ManualMacro do
   end
 
   defp _add_transition(trigger, params) do
-    params1 =
+    params =
     if is_list(params) do
-      params|>Enum.into(@default_params)|>Macro.escape
+      params|>Enum.into(@default_params)
+    else
+      params
+    end
+
+    params = 
+    if Map.get(params, :emit) do
+      Map.put_new(params, :collect, :before)
     else
       params
     end
@@ -67,7 +81,7 @@ defmodule Md0.Scanner.ManualMacro do
       if current_state == nil do
         raise "Must not call `#{unquote(macro_name_of_trigger(trigger))}` macro outside of state macro"
       end
-      @_transitions {unquote(trigger), current_state, unquote(params1)}
+      @_transitions {unquote(trigger), current_state, unquote(params|>Macro.escape)}
     end
   end
 
@@ -77,6 +91,17 @@ defmodule Md0.Scanner.ManualMacro do
   end
   defp macro_name_of_trigger(trigger), do: trigger
 
+
+  def add_token(tokens, {lnb, col}, part, state) do
+    string = part |> IO.iodata_to_binary() |> String.reverse()
+    [{state, string, lnb, col} | tokens]
+  end
+
+  def add_token_and_col(tokens, {lnb, col}, part, state) do
+    with [{_, string, _, _} | _] = new_tokens <- add_token(tokens, {lnb, col}, part, state) do
+      {col + String.length(string), new_tokens}
+    end
+  end
 
   defp emit_scan_definition(transition)
   defp emit_scan_definition({:empty, current_state, params}), do:
@@ -94,12 +119,12 @@ defmodule Md0.Scanner.ManualMacro do
   defp emit_empty_state_def(current_state, params)
   defp emit_empty_state_def(cs, %{emit: nil, state: :halt}) do
     quote do
-      def scan(unquote(cs), [], col, part, tokens), do: Enum.reverse(tokens)
+      def scan(unquote(cs), [], _, _, tokens), do: Enum.reverse(tokens)
     end
   end
   defp emit_empty_state_def(cs, %{emit: emit, state: :halt}) do
     quote do
-      def scan(unquote(cs), [], col, part, tokens), do: Enum.reverse(add_token(tokens, col, part, unquote(emit)))
+      def scan(unquote(cs), [], lnb_col, part, tokens), do: Enum.reverse(add_token(tokens, lnb_col, part, unquote(emit)))
     end
   end
   defp emit_empty_state_def(cs, %{emit: nil, state: ns}) do
@@ -107,7 +132,7 @@ defmodule Md0.Scanner.ManualMacro do
       raise "Illegal loop at EOI with state: #{cs}"
     else
       quote do
-        def scan(unquote(cs), [], col, part, tokens), do: scan(unquote(ns), [], col, part, tokens)
+        def scan(unquote(cs), [], lnb_col, part, tokens), do: scan(unquote(ns), [], lnb_col, part, tokens)
       end
     end
   end
@@ -116,9 +141,9 @@ defmodule Md0.Scanner.ManualMacro do
       raise "Illegal loop at EOI with state: #{cs}"
     else
       quote do
-        def scan(unquote(cs), [], col, part, tokens) do
-          {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-          scan(unquote(ns), [], nc, [], nts)
+        def scan(unquote(cs), [], {lnb, col}, part, tokens) do
+          {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+          scan(unquote(ns), [], {lnb, nc}, [], nts)
         end
       end
     end
@@ -132,19 +157,19 @@ defmodule Md0.Scanner.ManualMacro do
   end
   defp emit_halt_state_def(_, cs, %{collect: false, emit: emit}) do
     quote do
-      def scan(unquote(cs), _, col, parts, tokens), do: Enum.reverse(add_token(tokens, col, part, unquote(emit)))
+      def scan(unquote(cs), _, lnb_col, parts, tokens), do: Enum.reverse(add_token(tokens, lnb_col, part, unquote(emit)))
     end
   end
   defp emit_halt_state_def(:anything, cs, %{collect: :before, emit: emit}) do
     quote do
-      def scan(unquote(cs), [h|_], col, parts, tokens), do:
-        Enum.reverse(add_token(tokens, col, [h|part], unquote(emit)))
+      def scan(unquote(cs), [h|_], lnb_col, parts, tokens), do:
+        Enum.reverse(add_token(tokens, lnb_col, [h|part], unquote(emit)))
     end
   end
   defp emit_halt_state_def(grapheme, cs, %{collect: :before, emit: emit}) do
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_], col, parts, tokens), do:
-        Enum.reverse(add_token(tokens, col, [unquote(grapheme)|part], unquote(emit)))
+      def scan(unquote(cs), [unquote(grapheme)|_], lnb_col, parts, tokens), do:
+        Enum.reverse(add_token(tokens, lnb_col, [unquote(grapheme)|part], unquote(emit)))
     end
   end
   defp emit_halt_state_def(_, cs, _) do
@@ -158,69 +183,69 @@ defmodule Md0.Scanner.ManualMacro do
   end
   defp emit_no_advance_state_def(:anything, cs, %{collect: false, emit: nil, state: ns}) do
     quote do
-      def scan(unquote(cs), input, col, part, tokens), do: scan(unquote(ns), input, col, part, tokens)
+      def scan(unquote(cs), input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, part, tokens)
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{collect: false, emit: nil, state: ns}) do
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens), do: scan(unquote(ns), input, col, part, tokens)
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, part, tokens)
     end
   end
   defp emit_no_advance_state_def(:anything, cs, %{emit: nil, state: ns}) do
     quote do
-      def scan(unquote(cs), [head|_]=input, col, part, tokens), do: scan(unquote(ns), input, col, [head|part], tokens)
+      def scan(unquote(cs), [head|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, [head|part], tokens)
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{emit: nil, state: ns}) do
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens), do: scan(unquote(ns), input, col, [unquote(grapheme)|part], tokens)
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, [unquote(grapheme)|part], tokens)
     end
   end
   defp emit_no_advance_state_def(:anything, cs, %{collect: :before, emit: emit, state: ns}) do
     quote do
-      def scan(unquote(cs), [head|_]=input, col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, [head|part], unquote(emit))
-        scan(unquote(ns), input, nc, [], nts)
+      def scan(unquote(cs), [head|_]=input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [head|part], unquote(emit))
+        scan(unquote(ns), input, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{collect: :before, emit: emit, state: ns}) do
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, [unquote(grapheme)|part], unquote(emit))
-        scan(unquote(ns), input, nc, [], nts)
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [unquote(grapheme)|part], unquote(emit))
+        scan(unquote(ns), input, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_no_advance_state_def(:anything, cs, %{collect: nil, emit: emit, state: ns}) do
     quote do
-      def scan(unquote(cs), input, col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), input, nc, [], nts)
+      def scan(unquote(cs), input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), input, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{collect: nil, emit: emit, state: ns}) do
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), input, nc, [], nts)
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), input, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_no_advance_state_def(:anything, cs, %{emit: emit, state: ns}) do
     quote do
-      def scan(unquote(cs), [head|_]=input, col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), input, nc, [head], nts)
+      def scan(unquote(cs), [head|_]=input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), input, {lnb, nc}, [head], nts)
       end
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{emit: emit, state: ns}) do
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), input, nc, [unquote(grapheme)], nts)
+      def scan(unquote(cs), [unquote(grapheme)|_]=input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), input, {lnb, nc}, [unquote(grapheme)], nts)
       end
     end
   end
@@ -229,39 +254,39 @@ defmodule Md0.Scanner.ManualMacro do
   defp emit_advance_any_state_def(cs, %{collect: false, emit: nil}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [head|rest], col, part, tokens), do: scan(unquote(ns), rest, col, part, tokens)
+      def scan(unquote(cs), [head|rest], lnb_col, part, tokens), do: scan(unquote(ns), rest, lnb_col, part, tokens)
     end
   end
   defp emit_advance_any_state_def(cs, %{emit: nil}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [head|rest], col, part, tokens), do: scan(unquote(ns), rest, col, [head|part], tokens)
+      def scan(unquote(cs), [head|rest], lnb_col, part, tokens), do: scan(unquote(ns), rest, lnb_col, [head|part], tokens)
     end
   end
   defp emit_advance_any_state_def(cs, %{collect: :before, emit: emit}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [head|rest], col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, [head|part], unquote(emit))
-        scan(unquote(ns), rest, nc, [], nts)
+      def scan(unquote(cs), [head|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [head|part], unquote(emit))
+        scan(unquote(ns), rest, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_advance_any_state_def(cs, %{collect: false, emit: emit}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [_|rest], col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), rest, nc, [], nts)
+      def scan(unquote(cs), [_|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), rest, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_advance_any_state_def(cs, %{emit: emit}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [head|rest], col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), rest, nc, [head], nts)
+      def scan(unquote(cs), [head|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), rest, {lnb, nc}, [head], nts)
       end
     end
   end
@@ -270,163 +295,44 @@ defmodule Md0.Scanner.ManualMacro do
   defp emit_advance_on_state_def(g, cs, %{collect: false, emit: nil}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens), do:
-        scan(unquote(ns), rest, col, part, tokens)
+      def scan(unquote(cs), [unquote(g)|rest], lnb_col, part, tokens), do:
+        scan(unquote(ns), rest, lnb_col, part, tokens)
     end
   end
   defp emit_advance_on_state_def(g, cs, %{collect: true, emit: nil}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens), do:
-        scan(unquote(ns), rest, col, [unquote(g)|part], tokens)
+      def scan(unquote(cs), [unquote(g)|rest], lnb_col, part, tokens), do:
+        scan(unquote(ns), rest, lnb_col, [unquote(g)|part], tokens)
     end
   end
   defp emit_advance_on_state_def(g, cs, %{collect: :before, emit: emit}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, [unquote(g)|part], unquote(emit))
-        scan(unquote(ns), rest, nc, [], nts)
+      def scan(unquote(cs), [unquote(g)|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [unquote(g)|part], unquote(emit))
+        scan(unquote(ns), rest, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_advance_on_state_def(g, cs, %{collect: false, emit: emit}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), rest, nc, [], nts)
+      def scan(unquote(cs), [unquote(g)|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), rest, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_advance_on_state_def(g, cs, %{emit: emit}=params) do
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], col, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, col, part, unquote(emit))
-        scan(unquote(ns), rest, nc, [unquote(g)], nts)
+      def scan(unquote(cs), [unquote(g)|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
+        scan(unquote(ns), rest, {lnb, nc}, [unquote(g)], nts)
       end
     end
   end
 
 
-  # def emit_scan_definition({:anything, current_state, params, nil}), do:
-  #   emit_scan_def_on(current_state, (quote do: head), params)
-  # def emit_scan_definition({:on, current_state, params, grapheme}), do:
-  #   emit_scan_def_on(current_state, (quote do: unquote(grapheme)), params)
-
-
-  # defp emit_scan_def_empty(current_state, params)
-  # defp emit_scan_def_empty(current_state, %{state: state}=params) do
-  #   if current_state == state do
-  #     raise "Error loop in state #{inspect current_state} at EOI"
-  #   end
-  #   if state == nil || state == :halt do
-  #     emit_scan_def_empty_return(current_state, params)
-  #   else
-  #     emit_scan_def_empty_new_state(current_state, params)
-  #   end
-  # end
-
-  # defp emit_scan_def_empty_return(current_state, params)
-  # defp emit_scan_def_empty_return(current_state, %{emit: false}) do
-  #   quote do
-  #     def scan({unquote(current_state), [], col, partial, tokens}), do: tokens |> Enum.reverse
-  #   end
-  # end
-  # defp emit_scan_def_empty_return(current_state, %{emit: emit}) do
-  #   quote do
-  #     def scan({unquote(current_state), [], col, partial, tokens}), do:
-  #       [{unquote(emit), string_from(partial), col} | tokens] |> Enum.reverse
-  #   end
-  # end
-
-  # defp emit_scan_def_empty_new_state(current_state, params) do
-  #   quote do
-  #     def scan({unquote(current_state), [], col, partial, tokens}), do:
-  #       scan({unquote(params.new_state), [], col, partial, tokens})
-  #   end
-  # end
-
-
-  # defp emit_scan_def_on(current_state, first_element, params)
-  # defp emit_scan_def_on(current_state, first_element, %{advance: false}=params), do:
-  #   emit_scan_def_no_advance(current_state, params)
-  # defp emit_scan_def_on(current_state, first_element, %{collect: false}=params), do:
-  #   emit_scan_def_no_collect(current_state, first_element, params)
-
-
-  # defp emit_scan_def_no_advance(current_state, %{state: state} = params) do
-  #   if current_state == ( state || current_state ) do
-  #     raise "Error loop in state #{inspect current_state} must not use advance: false without changing state"
-  #   end
-  #   if state == :halt do
-  #     emit_scan_def_return(current_state, params)
-  #   else
-  #     emit_scan_def_continue(current_state, params)
-  #   end
-  # end
-
-  # defp emit_scan_def_return(current_state, params)
-  # defp emit_scan_def_return(current_state, %{emit: false}) do
-  #   quote do
-  #     def scan({unquote(current_state), _, _, _, tokens}), do: tokens |> Enum.reverse
-  #   end
-  # end
-  # defp emit_scan_def_return(current_state, %{collect: false, emit: emit}) do
-  #   quote do
-  #     def scan({unquote(current_state), _, col, partial, tokens}), do:
-  #       [{unquote(emit), string_from(partial), col} | tokens] |> Enum.reverse
-  #   end
-  # end
-
-  # defp emit_scan_def_no_collect(current_state, params)
-  # defp emit_scan_def_no_collect(current_state, 
-  #   # quote do
-  #   #   def scan({unquote(current_state), input, col, partial,
-    # end
-
-  # end
-
-
-    # quote do
-    #   def scan({ unquote(current_state), [], _, _, tokens}), do: Enum.revers(tokens) 
-    # end
-  # end
-  # def emit_scan_definition({:empty, current_state, _emit_state, nil}) do
-    # quote do
-    #   def scan({unquote(current_state), [], col, partial, tokens }), do: emit_return(unquote(current_state), col, partial, tokens)
-    # end
-  # end
-  # def emit_scan_definition({:on, current_state, %{state: new_state}, grapheme}) do
-    # quote do
-    #   def scan({unquote(current_state), [unquote(grapheme)|rest], col, partial, tokens}), do: scan({unquote(new_state), rest, col, [unquote(grapheme)|partial], tokens})
-    # end
-  # end
-
-  #   def scan_document(doc) do
-  #     doc
-  #     |> String.split(~r{\r\n?|\n})
-  #     |> Enum.zip(Stream.iterate(1, &(&1 + 1)))
-  #     |> Enum.flat_map(&scan_line/1)
-  #   end
-
-  #   defp add_lnb({tk, ct, col}, lnb), do: {tk, ct, lnb, col}
-
-  #   def scan_line({line, lnb}),
-  #     do: scan({ :start, String.graphemes(line), 1, [], [] }) |> Enum.map(&add_lnb(&1, lnb))
-
-  #   defp collect_emit({emit_state, input, col, partial, tokens}, grapheme, new_state) do
-  #     with rendered <- string_from([grapheme|partial]),
-  #        do: scan({ new_state, input, col + String.length(rendered), [], [{emit_state, rendered, col} | tokens] })
-  #   end
-
-  #   defp emit_collect({emit_state,input, col, partial, tokens}, grapheme, new_state) do
-  #     with rendered <- string_from(partial),
-  #        do: scan({ new_state, input, col + String.length(rendered), [grapheme], [ {emit_state, rendered, col} | tokens] })
-  #   end
-
-  #   defp emit_return(state, col, partial, tokens), do: [{state, string_from(partial), col} | tokens] |> Enum.reverse
-
-  #   defp string_from(partial), do: partial |> IO.iodata_to_binary() |> String.reverse()
 end

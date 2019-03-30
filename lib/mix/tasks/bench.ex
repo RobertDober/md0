@@ -16,8 +16,8 @@ defmodule Mix.Tasks.Bench do
   """
 
   @all_scanners [
-    macro: Md0.ManualMacroScanner,
     manual: Md0.ManualScanner,
+    macro: Md0.ManualMacroScanner,
     rgx: Md0.RgxScanner,
     table: Md0.MacroScanner,
   ]
