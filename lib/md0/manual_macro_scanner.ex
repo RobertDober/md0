@@ -2,13 +2,6 @@ defmodule Md0.ManualMacroScanner do
 
   use Md0.Scanner.ManualMacro
 
-  def scan_document(doc) do
-    doc
-    |> String.split(~r{\r\n?|\n})
-    |> Enum.zip(Stream.iterate(1, &(&1 + 1)))
-    |> Enum.flat_map(&scan_line/1)
-  end
-
 
   state :start do
     empty :halt# allows input do end here and emit all tokens scanned so far

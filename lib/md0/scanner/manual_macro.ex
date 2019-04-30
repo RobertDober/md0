@@ -22,6 +22,13 @@ defmodule Md0.Scanner.ManualMacro do
     quote do
       @before_compile unquote(__MODULE__)
       import unquote(__MODULE__)
+      def scan_document(doc) do
+        doc
+        |> String.split(~r{\r\n?|\n})
+        |> Enum.zip(Stream.iterate(1, &(&1 + 1)))
+        |> Enum.flat_map(&scan_line/1)
+      end
+
       def scan_line({line, lnb}), do:
         scan(:start, String.graphemes(line), {lnb, 1}, [], [])
       Module.register_attribute __MODULE__, :_transitions, accumulate: true
@@ -157,23 +164,26 @@ defmodule Md0.Scanner.ManualMacro do
   end
   defp emit_halt_state_def(_, cs, %{collect: false, emit: emit}) do
     quote do
-      def scan(unquote(cs), _, lnb_col, parts, tokens), do: Enum.reverse(add_token(tokens, lnb_col, part, unquote(emit)))
+      def scan(unquote(cs), _, lnb_col, parts, tokens), do: Enum.reverse(add_token(tokens, lnb_col, parts, unquote(emit)))
     end
   end
   defp emit_halt_state_def(:anything, cs, %{collect: :before, emit: emit}) do
     quote do
       def scan(unquote(cs), [h|_], lnb_col, parts, tokens), do:
-        Enum.reverse(add_token(tokens, lnb_col, [h|part], unquote(emit)))
+        Enum.reverse(add_token(tokens, lnb_col, [h|parts], unquote(emit)))
     end
   end
   defp emit_halt_state_def(grapheme, cs, %{collect: :before, emit: emit}) do
+    graphemes = String.graphemes(grapheme)
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_], lnb_col, parts, tokens), do:
-        Enum.reverse(add_token(tokens, lnb_col, [unquote(grapheme)|part], unquote(emit)))
+      def scan(unquote(cs), [unquote_splicing(graphemes)|_], lnb_col, parts, tokens) do
+        Enum.reverse(add_token(tokens, lnb_col, [unquote_splicing(Enum.reverse(graphemes))|parts], unquote(emit |> IO.inspect)))
+      end
     end
   end
-  defp emit_halt_state_def(_, cs, _) do
-    raise "Error collect does not make any sense in this halting context of state: #{cs}"
+  # We assume collect to be false unless it was :before
+  defp emit_halt_state_def(grapheme, cs, params) do
+    emit_halt_state_def(grapheme, cs, Map.put(params, :collect, :before))
   end
     
   defp emit_no_advance_state_def(trigger, current_state, params)
@@ -187,8 +197,9 @@ defmodule Md0.Scanner.ManualMacro do
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{collect: false, emit: nil, state: ns}) do
+    graphemes = String.graphemes(grapheme)
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, part, tokens)
+      def scan(unquote(cs), [unquote_splicing(graphemes)|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, part, tokens)
     end
   end
   defp emit_no_advance_state_def(:anything, cs, %{emit: nil, state: ns}) do
@@ -197,8 +208,9 @@ defmodule Md0.Scanner.ManualMacro do
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{emit: nil, state: ns}) do
+    graphemes = String.graphemes(grapheme)
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, [unquote(grapheme)|part], tokens)
+      def scan(unquote(cs), [unquote_splicing(graphemes)|_]=input, lnb_col, part, tokens), do: scan(unquote(ns), input, lnb_col, [unquote_splicing(Enum.reverse(graphemes))|part], tokens)
     end
   end
   defp emit_no_advance_state_def(:anything, cs, %{collect: :before, emit: emit, state: ns}) do
@@ -210,9 +222,10 @@ defmodule Md0.Scanner.ManualMacro do
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{collect: :before, emit: emit, state: ns}) do
+    graphemes = String.graphemes(grapheme)
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, {lnb, col}, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [unquote(grapheme)|part], unquote(emit))
+      def scan(unquote(cs), [unquote_splicing(graphemes)|_]=input, {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [unquote_splicing(Enum.reverse(graphemes))|part], unquote(emit))
         scan(unquote(ns), input, {lnb, nc}, [], nts)
       end
     end
@@ -226,8 +239,9 @@ defmodule Md0.Scanner.ManualMacro do
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{collect: nil, emit: emit, state: ns}) do
+    graphemes = String.graphemes(grapheme)
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, {lnb, col}, part, tokens) do
+      def scan(unquote(cs), [unquote_splicing(graphemes)|_]=input, {lnb, col}, part, tokens) do
         {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
         scan(unquote(ns), input, {lnb, nc}, [], nts)
       end
@@ -242,10 +256,11 @@ defmodule Md0.Scanner.ManualMacro do
     end
   end
   defp emit_no_advance_state_def(grapheme, cs, %{emit: emit, state: ns}) do
+    graphemes = String.graphemes(grapheme)
     quote do
-      def scan(unquote(cs), [unquote(grapheme)|_]=input, {lnb, col}, part, tokens) do
+      def scan(unquote(cs), [unquote_splicing(graphemes)|_]=input, {lnb, col}, part, tokens) do
         {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
-        scan(unquote(ns), input, {lnb, nc}, [unquote(grapheme)], nts)
+        scan(unquote(ns), input, {lnb, nc}, [unquote_splicing(Enum.reverse(graphemes))], nts)
       end
     end
   end
@@ -293,46 +308,50 @@ defmodule Md0.Scanner.ManualMacro do
 
   defp emit_advance_on_state_def(grapheme, current_state, params)
   defp emit_advance_on_state_def(g, cs, %{collect: false, emit: nil}=params) do
+    graphemes = String.graphemes(g)
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], lnb_col, part, tokens), do:
+      def scan(unquote(cs), [unquote_splicing(graphemes)|rest], lnb_col, part, tokens), do:
         scan(unquote(ns), rest, lnb_col, part, tokens)
     end
   end
   defp emit_advance_on_state_def(g, cs, %{collect: true, emit: nil}=params) do
+    graphemes = String.graphemes(g)
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], lnb_col, part, tokens), do:
-        scan(unquote(ns), rest, lnb_col, [unquote(g)|part], tokens)
+      def scan(unquote(cs), [unquote_splicing(graphemes)|rest], lnb_col, part, tokens), do:
+        scan(unquote(ns), rest, lnb_col, [unquote_splicing(Enum.reverse(graphemes))|part], tokens)
     end
   end
   defp emit_advance_on_state_def(g, cs, %{collect: :before, emit: emit}=params) do
+    graphemes = String.graphemes(g)
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], {lnb, col}, part, tokens) do
-        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [unquote(g)|part], unquote(emit))
+      def scan(unquote(cs), [unquote_splicing(graphemes)|rest], {lnb, col}, part, tokens) do
+        {nc, nts} = add_token_and_col(tokens, {lnb, col}, [unquote_splicing(Enum.reverse(graphemes))|part], unquote(emit))
         scan(unquote(ns), rest, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_advance_on_state_def(g, cs, %{collect: false, emit: emit}=params) do
+    graphemes = String.graphemes(g)
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], {lnb, col}, part, tokens) do
+      def scan(unquote(cs), [unquote_splicing(graphemes)|rest], {lnb, col}, part, tokens) do
         {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
         scan(unquote(ns), rest, {lnb, nc}, [], nts)
       end
     end
   end
   defp emit_advance_on_state_def(g, cs, %{emit: emit}=params) do
+    graphemes = String.graphemes(g)
     ns = Map.get(params, :state) || cs
     quote do
-      def scan(unquote(cs), [unquote(g)|rest], {lnb, col}, part, tokens) do
+      def scan(unquote(cs), [unquote_splicing(graphemes)|rest], {lnb, col}, part, tokens) do
         {nc, nts} = add_token_and_col(tokens, {lnb, col}, part, unquote(emit))
-        scan(unquote(ns), rest, {lnb, nc}, [unquote(g)], nts)
+        scan(unquote(ns), rest, {lnb, nc}, [unquote_splicing(Enum.reverse(graphemes))], nts)
       end
     end
   end
-
 
 end
